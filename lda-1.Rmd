@@ -1,0 +1,147 @@
+
+Biblioteki
+```{r}
+library(tidyverse)
+library(tidytext)
+library(broom)
+library(topicmodels)
+library(stringi)
+library(ldatuning)
+```
+
+Przeksztalcam dane do postaci Document Term Matrix
+```{r}
+dane_dtm <- dane %>%
+  select(ID, stem) %>% 
+  count(ID, stem, sort = TRUE) %>% 
+  ungroup() %>% 
+  cast_dtm(ID, stem, n)
+
+dane_dtm
+```
+
+Szukam optymalnej ilosci tematów przy pomocy pakietu ldatuning
+```{r}
+system.time(
+  
+  k_temat <- FindTopicsNumber(
+    dtm = dane_dtm,
+    topics = c(seq(2, 9, 1),
+               seq(10, 20, 2),
+               seq(25, 50, 5)),
+    metrics = c("Griffiths2004",
+                "CaoJuan2009",
+                "Arun2010",
+                "Deveaud2014"),
+    method = "Gibbs",
+    control = list(seed = 12345),
+    mc.cores =  4L,
+    verbose = TRUE)
+)
+
+# write_rds(k_temat, "k_temat1.rds")
+# png("k_tematow.png")
+# FindTopicsNumber_plot(k_temat)
+# dev.off()
+```
+
+Wybieram liczbe tematów k=6 
+```{r}
+lda_out <- LDA(dane_dtm,
+               k = 6,
+               control = list(seed = 1234))
+```
+
+Tworze obiekty przechowujace macierz beta i gamma modelu
+```{r}
+
+lda_tematy <- tidy(lda_out, matrix = "beta")
+
+lda_oferty <- tidy(lda_out, matrix = "gamma")
+```
+
+Wizualizacja najczesciej wystepujacych wyraz?w w ramach danego tematu (beta)
+```{r}
+
+lda_tematy %>% 
+  group_by(topic) %>% 
+  top_n(10, beta) %>% 
+  ungroup() %>% 
+  arrange(topic, -beta) %>% 
+  mutate(term = reorder(term, beta)) %>% 
+  ggplot(aes(x = term,
+             y = beta,
+             fill = factor(topic))) + 
+  geom_col(color = "grey",
+           show.legend = FALSE) + 
+  coord_flip() + 
+  facet_wrap(~ topic, scales = "free") +
+  labs(title = "Najczesciej wystepujace slowa \n w opisach stanowisk ofert pracy \n publikowanych na portalu 'nabory.kprm.gov.pl' \n w ramach danego tematu",
+       x = NULL,
+       y = "Prawdopodobienstwo przynalezenia slowa do tematu",
+       caption = "Zr?dlo: opracowanie wlasne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+
+Wyznaczam po piec ofert pracy, które zostaly najabrdziej jednoznacznie przypisane do danego tematu (1:6). Nastepnie dolaczam opis stanowiska do wgladu. Czytajac opisy stanowisk najbardziej jednoznacznie przypisanych do danego tematu próbuje zrozumiec jaki jest sens dla kazdego z tematów. 
+
+AD1. Okazuje sie, ze pod róznymi ID kryja sie 1:1 powtórzenia opisów stanowisk. 
+```{r}
+opisy <- read_rds("dane.rds") %>% select(ID, opis.stanowiska, tytul) %>% 
+  mutate(ID = as.character(ID))
+
+lda_oferty %>% 
+  arrange(-gamma) %>% 
+  group_by(topic) %>% 
+  slice(1:5) %>% 
+  left_join(opisy, by = c("document" = "ID")) %>% 
+  select(gamma, topic, tytul, opis.stanowiska)
+```
+
+Perplexity - miara oceny modelu, im mniejsza tym lepsza
+```{r}
+perplexity(lda_out)
+```
+
+Tworze macierz TF-IDF
+```{r}
+dane_tfidf <- dane %>% 
+  count(ID, stem, sort = TRUE) %>% 
+  bind_tf_idf(stem, ID, n)
+```
+
+1. Wizualizacja najbardziej relewentnych slów wystepujacych w opisach ofert pracy
+```{r}
+dane_tfidf %>% 
+  select(stem, tf_idf) %>% 
+  arrange(-tf_idf) %>% 
+  mutate(stem = factor(stem,
+                       levels = rev(unique(stem)))) %>% 
+  distinct(stem, .keep_all = TRUE) %>% 
+  top_n(30, tf_idf) %>% 
+  ggplot(aes(x = stem, y = tf_idf)) +
+  geom_col(fill = "lightblue", color = "grey") +
+  coord_flip() +
+  labs(title = "Najbardziej relewentne  slłwa występujące \n w opisach stanowisk ofert pracy \n publikowanych na portalu 'nabory.kprm.gov.pl'",
+       x = NULL,
+       y = "tf_idf", 
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+
+2. Wizualizacja najmniej relewentnych słów wystepujacych w opisach ofert pracy
+```{r}
+dane_tfidf %>% 
+  select(stem, tf_idf) %>% 
+  arrange(tf_idf) %>% 
+  mutate(stem = factor(stem,
+                       levels = rev(unique(stem)))) %>%
+  distinct(stem, .keep_all = TRUE) %>% 
+  top_n(-30, tf_idf) %>% 
+  ggplot(aes(x = stem, y = tf_idf)) +
+  geom_col(fill = "lightblue", color = "grey") +
+  coord_flip() +
+  labs(title = "Najmniej relewentne  słowa występujące \n w opisach stanowisk ofert pracy \n publikowanych na portalu 'nabory.kprm.gov.pl'",
+       x = NULL,
+       y = "tf_idf", 
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+

@@ -1,0 +1,96 @@
+
+Pakiety
+```{r}
+library(tidyverse)
+library(tidytext)
+library(broom)
+library(topicmodels)
+library(stringi)
+library(lubridate)
+library(wordcloud)
+library(RColorBrewer)
+```
+
+Wczytuję dane
+```{r}
+dane <- read_rds(path = "R-projekt/Licencjat/dane_lda")
+```
+
+1. Wizualizacja liczby ofert pracy zamieszczonych wg. czasu 
+```{r}
+dane_czas <- dane %>% 
+  mutate(rok = year(data.zamieszczenia.oferty),
+         mies = month(data.zamieszczenia.oferty),
+         tyg_dzien = factor(wday(data.zamieszczenia.oferty),
+                            levels = c(2:7, 1),
+                            labels = c("pn", "wt", "sr", "czw", "pt", "sob", "nied")))
+
+dane_czas %>% 
+  group_by(rok, mies) %>% 
+  summarise(n = n_distinct(ID)) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, 1), y=n)) + 
+  geom_col(fill = "lightblue", color = "grey") + 
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, vjust=1)) +
+  labs(title = "Liczba ofert pracy publikowanych w serwisie 'nabory.kprm.gov.pl'\n według miesięcy",
+       x = NULL,
+       y = NULL, 
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+
+2. Wizualizacja liczby ofert pracy zamieszczonych wg dnia tygodnia
+```{r}
+dane_czas %>% 
+  group_by(tyg_dzien) %>% 
+  summarise(n = n_distinct(ID)) %>% 
+  ggplot(aes(x = tyg_dzien, y = n, fill = tyg_dzien)) + 
+  geom_col() +
+  labs(title = "Liczba ofert pracy publikowanych w serwisie 'nabory.kprm.gov.pl'\n według dnia tygodnia",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+
+3. Wizualizacja ofert pracy zamieszczonych wg miesięcy z uwzględnieniem dnia tygodnia
+```{r}
+dane_czas %>% 
+  group_by(rok, mies, tyg_dzien) %>% 
+  summarise(n = n_distinct(ID)) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, 1), y = n, fill = tyg_dzien)) + 
+  geom_col(position = "stack") + 
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  labs(title = "Liczba ofert pracy publikowanych w serwisie 'nabory.kprm.gov.pl' \n według miesięcy z uwzględnieniem dnia tygodnia",
+       x = NULL,
+       y = NULL, 
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+
+4. Wizualizacja najczęściej występujących słów (po usunięciu z danych stopwords, transformacji słów do ich rdzenia oraz odrzucaniu słów niewystępujących w słowniku)
+```{r}
+dane %>% 
+  count(stem, sort = TRUE) %>% 
+  top_n(30) %>% 
+  mutate(stem = reorder(stem, n)) %>% 
+  ggplot(aes(x = stem, y = n)) +
+  geom_col(fill = "lightblue", color = "grey") +
+  coord_flip() +
+  labs(title = "Najczęściej występujące słowa \n w opisach stanowiska ofert pracy \n publikowanych na portalu 'nabory.kprm.gov.pl'",
+       x = NULL,
+       y = NULL, 
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+
+5. Wizualizacja najczęściej występujących słów w ofertach pracy typu "wordcloud"
+```{r}
+dane %>% 
+  count(stem, sort = TRUE) %>% 
+  with(wordcloud(words = stem, 
+                 freq = n, 
+                 max.word = 200,
+                 scale = c(2.8, .3),
+                 colors = brewer.pal(9, "GnBu")[3:9],
+                 random.order = F,
+                 rot.per = 0.15))
+```
+

@@ -1,0 +1,141 @@
+```{r}
+library(rvest)
+library(tidyverse)
+```
+Tworzę listę wszystkich stron z ofertami pracy. 
+TA METODA JEST DALEKA OD OPTYMALNEJ, NIEMNIEJ ZOSTAWIAM FOR FUN. Dodatkowo fajnie jest porównać czas obu metod
+
+ctrl+shift+c: komentowanie bloku tekstu
+```{r}
+# start_time1 <- Sys.time()
+# url <- "https://nabory.kprm.gov.pl/?Ad%5BisAdvancedMode%5D=&Ad%5Bsort%5D=1&Ad%5BpagesCnt%5D=10&Ad%5Bid_province%5D=&Ad%5Bid_city%5D=&Ad%5Bid_institution%5D=&Ad%5Bphrase%5D=&Ad%5Beducation%5D=&Ad%5Bid_institution_position%5D=&Ad%5Bis_disability%5D=0&Ad%5Bis_first_foreigner%5D=0&Ad%5Bis_replacement%5D=0&Ad%5Bdate_publication%5D=&Ad%5Bdate_expiration%5D=&Ad%5Bprocess_state%5D=1&search-button=&page=1&per-page=10"
+# 
+# session <- html_session(url = url)
+# sub_url <- list()
+# indeks = 1
+# while (is.na(url) == F) {
+#   
+#   sub_url[[indeks]] <- url
+#    
+#   url_text <- read_html(url) %>% html_node(".next a") %>% 
+#     html_text()
+#   
+#   if (is.na(url_text) == F) 
+#   {
+#     url <- read_html(url) %>% html_node(".next a") %>% 
+#     html_attr("href") %>% paste0("https://nabory.kprm.gov.pl", .)
+#     
+#     session <- session %>% follow_link(url_text)
+#   
+#     indeks <- indeks+1
+#   }
+#   else
+#   {
+#   return()  
+#   }
+# }
+# end_time1 <- Sys.time()
+# cat("czas trwania: ", end_time1 - start_time1)
+# 
+# sub_url1 <- sub_url
+```
+
+Tworzę listę wszystkich stron z ofertami pracy:
+z początkowego urla znajduję informację o ilości ofert pracy aktualnie dostępnych w wyszukiwarce.
+Następnie wyliczam ręcznie liczbę podstron dzieląc liczbę ofert przez 10 (domyślnie wyświetlanych) na każdej podstronie. Jeśli całkowita liczba ofert nie jest podzielna przez 10, to do całkowitej liczby podstron dodaję 1. (informacji o całkowitej liczbie podstron nie udało mi się znaleźć w kodzie samej strony)
+Ostatecznie tworzę listę, której każdy rekord jest "sklejonym" urlem każdej z podstron
+```{r}
+#start_time2 <- Sys.time()
+start_time <- Sys.time()
+
+url <- "https://nabory.kprm.gov.pl/?Ad%5BisAdvancedMode%5D=&Ad%5Bsort%5D=1&Ad%5BpagesCnt%5D=10&Ad%5Bid_province%5D=&Ad%5Bid_city%5D=&Ad%5Bid_institution%5D=&Ad%5Bphrase%5D=&Ad%5Beducation%5D=&Ad%5Bid_institution_position%5D=&Ad%5Bis_disability%5D=0&Ad%5Bis_first_foreigner%5D=0&Ad%5Bis_replacement%5D=0&Ad%5Bdate_publication%5D=&Ad%5Bdate_expiration%5D=&Ad%5Bprocess_state%5D=1&search-button=&page=1&per-page=10"
+sub_url <- c()
+n_ofert <- read_html(url) %>% html_node(".h2 b") %>% html_text() %>% as.numeric()
+
+if(n_ofert%%10 == 0)
+{
+  n_stron <- n_ofert%/%10
+} else
+{
+  n_stron <- n_ofert%/%10+1
+}
+
+for(i in 1:n_stron){
+  sub_url[i] <- paste0("https://nabory.kprm.gov.pl/?Ad%5BisAdvancedMode%5D=&Ad%5Bsort%5D=1&Ad%5BpagesCnt%5D=10&Ad%5Bid_province%5D=&Ad%5Bid_city%5D=&Ad%5Bid_institution%5D=&Ad%5Bphrase%5D=&Ad%5Beducation%5D=&Ad%5Bid_institution_position%5D=&Ad%5Bis_disability%5D=0&Ad%5Bis_first_foreigner%5D=0&Ad%5Bis_replacement%5D=0&Ad%5Bdate_publication%5D=&Ad%5Bdate_expiration%5D=&Ad%5Bprocess_state%5D=1&search-button=&page=", i, "&per-page=10")
+}
+# end_time2 <- Sys.time()
+# cat("czas trwania: ", end_time2 - start_time2)
+# 
+# 
+# #do porównania, czy metoda 1 i metoda 2 zwracają te same wyniki
+# #sub_url2 <- sub_url
+# #identical(sub_url1, sub_url2)
+```
+
+
+Pobieram adresy url każdej z ofert pracy, po 10 na każdej z podstron. Używam funkcji unlist, aby nie mieć listy zagdnieżdżonej. Muszę także skleić adres hiperłącza z początkiem adresu strony
+```{r}
+job_url = list()
+
+for (i in 1:length(sub_url)) {
+  kprm_web <- read_html(sub_url[i])
+job_url[[i]] <- kprm_web %>% html_nodes("a.single") %>% 
+          html_attr("href")
+}
+job_url <- unlist(job_url) %>% paste0("https://nabory.kprm.gov.pl",.)
+```
+
+Inicjuję dataframe "job_offer", w którym przechowywane będą dane, oraz "df", który pomoże mi ją zapełnić. W pętli przechodzę po każdym z urli i pobieram najważniejsze iformacje o ofercie pracy. Pod koniec pętli dokładam wiersz będący pojedynczym rekordem do głownego dataframe. Finalnie z prawej strony doklejam kolumnę zawierającą url każdej z ofert pracy i nadaję kolumnom etykiety.
+```{r}
+job_offer <- data.frame()
+df <- data.frame(matrix(ncol = 7))
+for (i in job_url)
+{
+  page <- read_html(i)
+  
+    df[,1] <- page %>% html_nodes(".so-h h4, .so-h h3 , h1") %>%
+                           html_text() %>% paste(., collapse = " ")
+
+    df[,2] <- page %>% html_nodes(".bor p , .bor strong") %>%
+                            html_text() %>% paste(., collapse = " ")
+
+    df[,3] <- page %>% html_nodes(".ar div") %>%
+                            html_text() %>% str_remove_all(.,"[•=–-]") %>%
+                            str_squish()
+
+    df[,4] <- page %>% html_nodes("section:nth-child(2) li") %>%
+                            html_text() %>% str_remove_all(.,"[•=–-]") %>%
+                            paste(., collapse = " ") %>% str_squish()
+
+    df[,5] <- page %>% html_nodes("p:nth-child(5) span") %>%
+                                html_text() %>% paste(., collapse = " ")
+
+    df[,6] <- page %>% html_nodes("section:nth-child(3) li") %>%
+                          html_text() %>% str_remove_all(.,"[•=–-]") %>%
+                          paste(., collapse = " ") %>% str_squish()
+    
+    df[,7] <- page %>% html_nodes(".id") %>% html_text() %>% str_squish()
+
+
+    job_offer <- rbind.data.frame(job_offer, df)
+}
+
+job_offer <- cbind(job_offer, job_url)
+colnames(job_offer) <- c("tytuł", "termin składania dokumentów", "warunki pracy", "opis stanowiska", "data zamieszczenia oferty", "wymagania", "ID", "url")
+```
+
+Zapisuję df do pliku csv oraz wyznaczam czas, jaki zajęło skompilowanie całego kodu.
+```{r}
+
+write.csv(x = job_offer, file = "oferty-pracy-kprm.csv")
+end_time <- Sys.time()
+duration <- end_time - start_time
+cat("czas trwania: ", duration)
+```
+
+
+Usunięcie środowiska
+```{r}
+#rm(list = ls())
+
+```

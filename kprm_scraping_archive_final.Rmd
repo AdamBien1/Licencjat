@@ -1,0 +1,87 @@
+```{r}
+library(rvest)
+library(tidyverse)
+```
+
+```{r}
+start_time <- Sys.time()
+url <- "https://nabory.kprm.gov.pl/wyniki-naborow?AdResult%5BpagesCnt%5D=10&AdResult%5BisAdvancedMode%5D=&AdResult%5Bsort%5D=1&AdResult%5Bid%5D=&AdResult%5Bid_institution%5D=&AdResult%5Bid_institution_position%5D=&search-button2=&page=1&per-page=10"
+sub_url <- c()
+n_ofert <- read_html(url) %>% html_node(".h2 b") %>% html_text() %>% as.numeric()
+
+if(n_ofert%%10 == 0)
+{
+  n_stron <- n_ofert%/%10
+} else
+{
+  n_stron <- n_ofert%/%10+1
+}
+
+for(i in 1:n_stron){
+  sub_url[i] <- paste0("https://nabory.kprm.gov.pl/wyniki-naborow?AdResult%5BpagesCnt%5D=10&AdResult%5BisAdvancedMode%5D=&AdResult%5Bsort%5D=1&AdResult%5Bid%5D=&AdResult%5Bid_institution%5D=&AdResult%5Bid_institution_position%5D=&search-button2=&page=", i, "&per-page=10")
+}
+```
+
+```{r}
+job_url = list()
+
+for (i in 1:length(sub_url)) {
+  kprm_web <- read_html(sub_url[i])
+job_url[[i]] <- kprm_web %>% html_nodes("a.single") %>% 
+          html_attr("href")
+}
+job_url <- unlist(job_url) %>% paste0("https://nabory.kprm.gov.pl",.)%>% 
+          gsub("/wyniki-naborow", "",.)
+```
+
+```{r}
+job_offer <- data.frame()
+df <- data.frame(matrix(ncol = 7))
+for (i in job_url)
+{
+  page <- read_html(i)
+  
+    df[,1] <- page %>% html_nodes(".so-h h4, .so-h h3 , h1") %>%
+                           html_text() %>% paste(., collapse = " ")
+
+    df[,2] <- page %>% html_nodes(".bor p , .bor strong") %>%
+                            html_text() %>% paste(., collapse = " ")
+
+    df[,3] <- page %>% html_nodes(".ar div") %>%
+                            html_text() %>% str_remove_all(.,"[•=–-]") %>%
+                            paste(., collapse = " ") %>% str_squish()
+
+    df[,4] <- page %>% html_nodes("section:nth-child(2) li") %>%
+                            html_text() %>% str_remove_all(.,"[•=–-]") %>%
+                            paste(., collapse = " ") %>% str_squish()
+
+    df[,5] <- page %>% html_nodes("p:nth-child(5) span") %>%
+                                html_text() %>% paste(., collapse = " ")
+
+    df[,6] <- page %>% html_nodes("section:nth-child(3) li") %>%
+                          html_text() %>% str_remove_all(.,"[•=–-]") %>%
+                          paste(., collapse = " ") %>% str_squish()
+    
+    df[,7] <- page %>% html_nodes(".id") %>% html_text() %>% str_squish()
+
+
+    job_offer <- rbind.data.frame(job_offer, df)
+}
+
+job_offer <- cbind(job_offer, job_url)
+colnames(job_offer) <- c("tytuł", "termin składania dokumentów", "warunki pracy", "opis stanowiska", "data zamieszczenia oferty", "wymagania", "ID", "url")
+```
+
+```{r}
+write.csv(x = job_offer, file = "oferty-pracy-kprm_archiwum.csv")
+end_time <- Sys.time()
+duration <- end_time - start_time
+cat("czas trwania: ", duration)
+```
+
+
+```{r}
+#rm(list = ls())
+```
+
+

@@ -1,0 +1,222 @@
+
+Biblioteki
+```{r}
+library(tidyverse)
+library(tidytext)
+library(broom)
+library(topicmodels)
+library(stringi)
+library(ldatuning)
+```
+
+Usuwam 1% najczęściej i najrzadziej występujących słów 
+```{r}
+high_n <- dane %>% 
+  count(stem, sort = TRUE) %>% 
+  top_n(round(0.01*nrow(.),0)) %>% 
+  mutate(stem = reorder(stem, n))
+
+low_n <- dane %>% 
+  count(stem, sort = TRUE) %>% 
+  top_n(-round(0.01*nrow(.),0)) %>% 
+  mutate(stem = reorder(stem, n))
+
+dane2 <- dane %>% 
+  anti_join(high_n, by = "stem") %>% 
+  anti_join(low_n, by = "stem")
+```
+
+Przekształcam dane do postaci Document Term Matrix
+```{r}
+dane_dtm2 <- dane2 %>%
+  select(ID, stem) %>% 
+  count(ID, stem, sort = TRUE) %>% 
+  ungroup() %>% 
+  cast_dtm(ID, stem, n)
+
+dane_dtm2
+```
+
+Szukam optymalnej ilości tematów przy pomocy pakietu ldatuning
+```{r}
+system.time(
+  
+  k_temat2 <- FindTopicsNumber(
+    dtm = dane_dtm2,
+    topics = c(seq(2, 9, 1),
+               seq(10, 20, 2),
+               seq(25, 50, 5)),
+    metrics = c("Griffiths2004",
+                "CaoJuan2009",
+                "Arun2010",
+                "Deveaud2014"),
+    method = "Gibbs",
+    control = list(seed = 12345),
+    mc.cores =  4L,
+    verbose = TRUE)
+)
+
+write_rds(k_temat2, "k_temat2.rds")
+png("k_temat2.png")
+FindTopicsNumber_plot(k_temat2)
+dev.off()
+```
+
+Wybieram liczbę tematów k={5, 7, 9, 12, 18} 
+```{r}
+lda_list <- list()
+i <- 1
+for (k in c(5, 7, 9, 12, 18))
+{
+  lda_list[[i]] <- LDA(dane_dtm2,
+                       k = k,
+                       control = list(seed = 1234))
+  print(paste0("skończyłem model ", i))
+  i <- i+1
+}
+
+write_rds(lda_list, "lda_list.rds")
+```
+
+Tworzę obiekty przechowujące macierz beta i gamma modelu
+```{r}
+lda_list <- read_rds("lda_list.rds")
+beta_list <- list()
+gamma_list <- list()
+
+for(i in 1:length(lda_list))
+{
+beta_list[[i]] <- tidy(lda_list[[i]], matrix = "beta")
+gamma_list[[i]] <- tidy(lda_list[[i]], matrix = "gamma")
+}
+```
+
+Wizualizacja najczęściej występujących wyrazów w ramach danego tematu (beta)
+```{r}
+k <- c(5, 7, 9, 12, 18)
+for(i in 1:5)
+{
+beta_list[[i]] %>% 
+  group_by(topic) %>% 
+  top_n(10, beta) %>% 
+  ungroup() %>% 
+  arrange(topic, -beta) %>% 
+  mutate(term = reorder(term, beta)) %>% 
+  ggplot(aes(x = term,
+             y = beta,
+             fill = factor(topic))) + 
+  geom_col(color = "grey",
+           show.legend = FALSE) + 
+  coord_flip() + 
+  facet_wrap(~ topic, scales = "free_y") +
+  labs(title = "Najczęściej występujące słowa \n w opisach stanowisk ofert pracy \n publikowanych na portalu 'nabory.kprm.gov.pl' \n w ramach danego tematu",
+       x = NULL,
+       y = "Prawdopodobieństwo przynależności słowa do tematu",
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'") +
+  ggsave(paste0(k[i], "_tematow_wykres.png"))
+}
+```
+
+Wyznaczam po trzy ofert pracy, które zostały najabrdziej jednoznacznie przypisane do danego tematu (1:9). Następnie dołączam tytuł stanowiska do wglądu. Bazując na słowach z wykresu wyżej i tytułów stanowisk staram się zrozumieć czego dotyczy każda z grup (tematów).
+
+AD1. Okazuje się, że pod różnymi ID kryją się 1:1 powtórzenia opisów stanowisk. 
+```{r}
+# opisy <- read_rds("dane.rds") %>% select(ID, opis.stanowiska, tytul) %>% 
+#   mutate(ID = as.character(ID))
+
+stanowiska <- gamma_list[[3]] %>% 
+  left_join(opisy, by = c("document" = "ID")) %>% 
+  arrange(-gamma) %>% 
+  distinct(tytul, .keep_all = TRUE) %>% 
+  group_by(topic) %>% 
+  slice(1:3) %>% 
+  select(topic, tytul)
+
+for(i in 1:9)
+{
+stanowiska %>% 
+    filter(topic == i) %>%
+    select(tytul) %>% 
+    print()
+} 
+```
+Topic1: Stanowiska związane z ochroną przyrody
+  Kluczowe słowa: inwestycja, nieruchomość, zabytek, droga, warunek, pozwolenie, obszar, ruch, robot, przestrzenny
+
+Topic2: Stanowiska związane z zagadnieniami weterynaryjnymi, bezpieczeństwem żywności i higieny
+  Kluczowe słowa: pochodzenie, choroba, zwierzęcy, weterynaryjny, obrót, zakaźny, zwalczanie, lekarz, weterynaria, leczniczy
+  
+Topic3: Ewidencje i rejestracje
+  Kluczowe słowa: zwrot, deklaracja, prawidłowość, nadpłat, wymagać, rozliczenie, załatwiać, wysokość, wpłata, wykorzystanie
+  Label: 
+  
+Topic4: Stanowiska związane z zagadnieniami informatycznymi, programowaniem, wsparciem i administrowaniem systemami komputerowymi
+  Kluczowe słowa: zarządzanie, sprzęt, usługa, teleinformatyczny, sieć, użytkownik, komputerowy, urządzenie, administrować, służba
+  
+Topic5: stanowiska związane z zagadnieniami finansowymi, księgowymi, planowaniem budżetu
+  Kluczowe słowa: budżetowy, wydatek, budżet, księgowa, rozliczenie, rozliczać, należności, dochód, wojewoda, wynagrodzenie
+  
+Topic6: stanowiska związane z zagadnieniami pomocą społeczną, opieką nad osobami niepełnosprawnymi, chorymi i starszymi, rodziny zastępcze
+  Słowa kluczowe: świadczenie, cudzoziemiec, społeczny, pobyt, pomoc, rodzina, placówka, zezwolenie, samorząd, służba
+  
+Topic7: Stanowiska związane z zagadnieniami gospodarki i transportu morskiego, handlu i współpracy międzynarodowej
+  Słowa kluczowe: ministerstwo, opiniować, minister, europejski, departament, międzynarodowy, instytucja, odpowiedź, komisja, organizacja
+  
+Topic8: Stanowiska związane z zagadnieniami ochrony i przetwarzania informacji niejawnych, policja
+  Słowa kluczowe: korespondencja, policja, niejawny, służbowy, komenda, obieg, archiwum, elektroniczny, pismo, ewidencjonować
+  
+Topic9: Stanowiska związane z zagadnieniami spraw wierzycielskich
+  Słowa kluczowe: skarbowy, egzekucyjny, skarga, postanowienie, drogowe, należności, droga, sąd, rozstrzygnięcie, odpowiedź
+  
+########################################
+
+Perplexity - miara oceny modelu, im mniejsza tym lepsza
+```{r}
+perplexity(lda_list[[3]])
+```
+
+Tworzę macierz TF-IDF
+```{r}
+dane_tfidf2 <- dane2 %>% 
+  count(ID, stem, sort = TRUE) %>% 
+  bind_tf_idf(stem, ID, n)
+```
+
+1. Wizualizacja najbardziej relewentnych słów występujących w opisach ofert pracy
+```{r}
+dane_tfidf2 %>% 
+  select(stem, tf_idf) %>% 
+  arrange(-tf_idf) %>% 
+  mutate(stem = factor(stem,
+                       levels = rev(unique(stem)))) %>% 
+  distinct(stem, .keep_all = TRUE) %>% 
+  top_n(30, tf_idf) %>% 
+  ggplot(aes(x = stem, y = tf_idf)) +
+  geom_col(fill = "lightblue", color = "grey") +
+  coord_flip() +
+  labs(title = "Najbardziej relewentne  słowa występujące \n w opisach stanowiska ofert pracy \n publikowanych na portalu 'nabory.kprm.gov.pl'",
+       x = NULL,
+       y = "tf_idf", 
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+
+2. Wizualizacja najmniej relewentnych słów występujących w opisach ofert pracy
+```{r}
+dane_tfidf2 %>% 
+  select(stem, tf_idf) %>% 
+  arrange(tf_idf) %>% 
+  mutate(stem = factor(stem,
+                       levels = rev(unique(stem)))) %>%
+  distinct(stem, .keep_all = TRUE) %>% 
+  top_n(-30, tf_idf) %>% 
+  ggplot(aes(x = stem, y = tf_idf)) +
+  geom_col(fill = "lightblue", color = "grey") +
+  coord_flip() +
+  labs(title = "Najmniej relewentne  słowa występujące \n w opisach stanowiska ofert pracy \n publikowanych na portalu 'nabory.kprm.gov.pl'",
+       x = NULL,
+       y = "tf_idf", 
+       caption = "Źródło: opracowanie własne na podstawie danych \n zebranych z portalu 'nabory.kprm.gov.pl'")
+```
+
+
+

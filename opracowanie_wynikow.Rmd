@@ -1,0 +1,333 @@
+
+Tworzę nową zmienną, która tematom 1:9 nadaje nazwę 
+```{r}
+lda_popyt <- gamma_list[[3]] %>%
+  mutate(topic_new = case_when(
+    topic == 1 ~ "infrastruktura",
+    topic == 2 ~ "weterynaria, bezpieczeństwo żywności i higiena",
+    topic == 3 ~ "ewidencja i rejestracja",
+    topic == 4 ~ "informatyka, programowanie i wsparcie techniczne",
+    topic == 5 ~ "finanse, księgowość i budżetowanie",
+    topic == 6 ~ "pomoc społeczna i cudzoziemcy",
+    topic == 7 ~ "polityka międzynarodowa",
+    topic == 8 ~ "ochrona i bezpieczeństwo państwa",
+    topic == 9 ~ "legislacja"
+  ))
+```
+
+Sprawdzam na losowym ID, czy współczynnik gamma sumuje się do 1. Sumuje się.
+```{r}
+lda_popyt %>% 
+  filter(as.numeric(document) == sample(2:45996, 1)) %>% 
+  select(gamma) %>% 
+  sum()
+```
+
+Wyznaczam liczbę ofert dla każdego z tematów oraz udział danego tematu względem wszystkich ofert pracy
+```{r}
+# n <- read_rds("R-projekt/Licencjat/dane.rds") %>%
+#   nrow()
+
+wynik <- lda_popyt %>% 
+  group_by(topic_new) %>% 
+  select(topic_new, gamma) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  mutate(odsetek = n_ofert/n)
+
+wynik %>% 
+  summarise(sum(n_ofert)) == n
+
+print(wynik)
+```
+
+Wizualizacja 0-A: Liczba ofert pracy według dziedziny wyznaczona z modelu
+```{r}
+wynik %>% 
+  ggplot(aes(x = topic_new, y = n_ofert, fill)) + 
+  geom_col(fill = "lightblue", color = "grey") +
+  theme(axis.text.x = element_text(angle = 22.5, hjust=1, vjust=1)) + 
+  labs(title = "Liczba ofert pracy według dziedziny wyznaczona z modelu",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: opracowanie własne")
+```
+
+Wizualizacja 0-B: Udział procentowy popytu na pracę w ofertach publikowanych na'nabory.kprm.gov.pl' według kategorii w postaci wykresu kołowego
+```{r}
+wynik %>% 
+ggplot(aes(x = "", y = odsetek, fill = topic_new)) +
+  geom_bar(width = 1, stat = "identity", color = "black") +
+  coord_polar("y", start = 0) +
+  scale_fill_brewer(palette = "Set1") +
+  geom_text(aes(label = paste0(round(odsetek, 2), "%")), 
+              position = position_stack(vjust = 0.5)) +
+  labs(title = "Udział procentowy popytu na pracę \n w ofertach publikowanych na'nabory.kprm.gov.pl' według kategorii",
+       x = NULL,
+       y = NULL,
+       fill = NULL,
+       caption = "Źródło: Opracowanie własne") +
+    guides(fill = guide_legend(reverse = TRUE)) +
+  theme_classic() +
+    theme(axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()) + 
+  ggsave("odsetek_all_pie.png")
+```
+
+Tworzę df, z którego będę robił wykresy.
+```{r}
+daty <- dane %>% 
+  select(data.zamieszczenia.oferty, ID) %>% 
+  mutate(rok = year(data.zamieszczenia.oferty),
+         mies = month(data.zamieszczenia.oferty),
+         tyg_dzien = factor(wday(data.zamieszczenia.oferty),
+                            levels = c(2:7, 1),
+                            labels = c("pn", "wt", "sr", "czw", "pt", "sob", "nied")))
+
+daty_popyt <- lda_popyt %>%
+  mutate(document = as.numeric(document)) %>% 
+  left_join(daty, by = c("document" = "ID")) 
+  
+```
+
+Wizualizacja 1: liczba ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres słupkowy typu "stacked"
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = n_ofert,
+             fill = factor(topic_new))) +
+  geom_col(positon = "stack", color = "black") +
+  scale_fill_brewer(palette = "Set1") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Liczba ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") + 
+  ggsave(filename = "n_ofert_stacked_co_kwartał.png")
+```
+
+Wizalizacja 2: Liczba ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres słupkowy + facet_wrap
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = n_ofert,
+             fill = factor(topic_new))) +
+  geom_col(color = "black") +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~topic_new) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Liczba ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "n_ofert_column_facetwrap_co_kwartał.png")
+```
+
+Wizualizacja 3: Liczba ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres liniowy wygładzony
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = n_ofert,
+             color = factor(topic_new))) +
+  geom_smooth(se = F) +
+  scale_color_brewer(palette = "Set1") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Liczba ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "n_ofert_smooth_co_kwartał.png")
+```
+
+Wizualizacja 4: Liczba ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres liniowy wygładzony + facet_wrap
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = n_ofert,
+             color = factor(topic_new))) +
+  geom_smooth(se = F) +
+  scale_color_brewer(palette = "Set1") +
+  facet_wrap(~topic_new) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Liczba ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "n_ofert_smooth_facetwrap_co_kwartał.png")
+```
+
+Pomocnicze
+```{r}
+n_kwartal <- daty_popyt %>% 
+  group_by(rok, mies) %>% 
+  summarise(n_all = sum(gamma))
+```
+
+Wizualizacja 5: Udziały ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres słupkowy typu "stacked" (ODSETEK)
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>%
+  left_join(n_kwartal, by = c("rok" = "rok", "mies" = "mies")) %>% 
+  mutate(odsetek = n_ofert/n_all) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = odsetek,
+             fill = factor(topic_new))) +
+  geom_col(positon = "stack", color = "black") +
+  scale_fill_brewer(palette = "Set1") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Udział ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "odsetek_stacked_co_kwartał.png")
+```
+
+Wizualizacja 6: Udziały ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres słupkowy + facet_wrap (ODSETEK)
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  left_join(n_kwartal, by = c("rok" = "rok", "mies" = "mies")) %>% 
+  mutate(odsetek = n_ofert/n_all) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = odsetek,
+             fill = factor(topic_new))) +
+  geom_col(color = "black") +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~topic_new) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Udział ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "odsetek_column_facetwrap_co_kwartał.png")
+```
+
+Wizualizacja 7: Udziały ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres liniowy wygładzony (ODSETEK)
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  left_join(n_kwartal, by = c("rok" = "rok", "mies" = "mies")) %>% 
+  mutate(odsetek = n_ofert/n_all) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = odsetek,
+             color = factor(topic_new))) +
+  geom_smooth(se = F) +
+  scale_color_brewer(palette = "Set1") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Udziały ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "odsetek_smooth_co_kwartał.png")
+```
+
+Wizualizacja 8: Udziały ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres liniowy wygładzony + facet_wrap (ODSETEK)
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  left_join(n_kwartal, by = c("rok" = "rok", "mies" = "mies")) %>% 
+  mutate(odsetek = n_ofert/n_all) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = odsetek,
+             color = factor(topic_new))) +
+  geom_smooth(se = F) +
+  scale_color_brewer(palette = "Set1") +
+  facet_wrap(~topic_new) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Udziały ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "odsetek_smooth_facetwrap_co_kwartał.png")
+```
+
+Pomocnicze
+```{r}
+zrodlo <- read_csv("dane.csv") %>% select(ID, zrodlo)
+daty_popyt_zrodlo <- daty_popyt %>% 
+  left_join(zrodlo, by = c("document" = "ID")) %>% 
+  mutate(zrodlo = as.factor(zrodlo))
+```
+
+Z archiwum; nie wiem, czy przydatne
+```{r}
+daty_popyt_zrodlo %>% 
+  group_by(zrodlo, rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>%
+  left_join(n_kwartal, by = c("rok" = "rok", "mies" = "mies")) %>%
+  mutate(odsetek = n_ofert/n_all) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = odsetek,
+             fill = zrodlo)) +
+  geom_col() +
+  facet_wrap(~factor(topic_new)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Udział ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "odsetek_column_facetwrap_co_kwartał.png")
+```
+
+Wizualizacja 9: Udziały ofert pracy wyznaczonych przy pomocy modelu z podziałem na kategorie jako wykres powierzchniowy (ODSETEK)
+```{r}
+daty_popyt %>% 
+  select(gamma, rok, mies, topic_new) %>% 
+  group_by(rok, mies, topic_new) %>% 
+  summarise(n_ofert = sum(gamma)) %>% 
+  left_join(n_kwartal, by = c("rok" = "rok", "mies" = "mies")) %>% 
+  mutate(odsetek = n_ofert/n_all) %>% 
+  ggplot(aes(x = make_date(year = rok, month = mies, day = 1L),
+             y = odsetek,
+             group = factor(topic_new))) +
+  geom_area(aes(fill = factor(topic_new))) +
+  scale_fill_brewer(palette = "Set1") +
+  geom_line(aes(group = factor(topic_new)), position = "stack") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%m.%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.title = element_blank()) +
+  labs(title = "Udziały ofert pracy wyznaczonych przy pomocy modelu\n z podziałem na kategorie",
+       x = NULL,
+       y = NULL,
+       caption = "Źródło: Opracowanie własne") +
+  ggsave(filename = "odsetek_area_stack_co_kwartał.png")
+```
+

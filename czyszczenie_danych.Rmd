@@ -1,0 +1,46 @@
+```{r}
+library(tidyverse)
+library(lubridate)
+```
+
+```{r}
+#pobieram dane 
+dane_ar <- read.csv("oferty-pracy-kprm_archiwum.csv")
+dane_cu <- read.csv("oferty-pracy-kprm.csv")
+
+#łączę dwa zbiory w jeden
+dane <- bind_rows("aktualne" = dane_cu, "archiwum" = dane_ar, .id = "zrodło")
+
+ 
+#zmieniam typ źródła z character na factor
+dane <- dane %>% mutate_at(., vars("zrodlo"), funs(as.factor)) %>% 
+#zmieniam kolejność kolumn, usuwam kolumnę X
+      select(ID, data.zamieszczenia.oferty, termin.skladania.dokumentów, 
+             tytul, opis.stanowiska, wymagania, warunki.pracy, zrodlo, url, -X) %>% 
+#zmieniam typ ID z character na integer
+      mutate_at(., vars("ID"), funs(as.integer(str_remove(., "nr ")))) %>% 
+#zmieniam typ odpowiednich kolumn z character na Date
+      mutate(termin.skladania.dokumentów = str_replace_all(termin.skladania.dokumentów,
+                                              c(
+                                              "stycznia" = "01",
+                                              "lutego" = "02",
+                                              "marca" = "03",
+                                              "kwietnia" = "04",
+                                              "maja" = "05",
+                                              "czerwca" = "06",
+                                              "lipca" = "07",
+                                              "sierpnia" = "08",
+                                              "września" = "09",
+                                              "października" = "10",
+                                              "listopada" = "11",
+                                              "grudnia" = "12")) %>% 
+                              str_replace_all(" ", ".")) %>% 
+      mutate_at(., vars("data.zamieszczenia.oferty", "termin.skladania.dokumentów"),
+                         funs(dmy(str_sub(., -10, -1))))
+        
+```
+
+```{r}
+saveRDS(dane, "dane.rds")
+```
+

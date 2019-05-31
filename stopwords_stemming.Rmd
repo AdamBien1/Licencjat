@@ -1,0 +1,104 @@
+
+Pakiety
+```{r}
+library(tidyverse)
+library(tidytext)
+library(broom)
+library(topicmodels)
+library(stringi)
+```
+
+Wczytanie "surowych" danych
+```{r}
+kprm_raw <- readRDS("dane.rds")
+```
+
+wybieram jedynie interesujące mnie kolumny:
+```{r}
+#colnames(kprm_raw)
+
+kprm_raw <- kprm_raw %>% 
+  select(ID, data.zamieszczenia.oferty, opis.stanowiska)
+
+#sprawdzam, czy zmienne są odpowiedniego typu
+#lapply(X = kprm_raw, FUN = class)
+```
+
+Wczytuję polskie stopwords i słownik morfologiczny pobrane z: https://github.com/MarcinKosinski/trigeR5/blob/master/dicts/polimorfologik-2.1.zip
+```{r}
+stopwords <- read_lines("morfologik/stopwords.txt")
+stem_dict <- read_csv2("morfologik/polimorfologik-2.1.txt", col_names = c("stem", "word"))
+
+#zamieniam wielkość liter na małe i usuwam duplikaty
+stem_dict <- stem_dict %>% 
+  mutate(stem = str_to_lower(stem),
+         word = str_to_lower(word)) %>% 
+  distinct()
+```
+
+Rozbijam słowa w opisie stanowiska na tokeny
+```{r}
+kprm_tidy <- kprm_raw %>% 
+  unnest_tokens(output = word, 
+                input = opis.stanowiska, 
+                to_lower = TRUE)
+
+#head(kprm_tidy)
+```
+
+Usuwam polskie znaki z opisów ofert pracy, ze zbioru stopwords oraz ze słownika morfologiczengo
+```{r}
+kprm_ascii <- kprm_tidy %>% 
+  mutate(word = stri_trans_general(word,
+                                   "Latin-ASCII"))
+
+stopwords_ascii <- stri_trans_general(stopwords,
+                                      "Latin-ASCII")
+
+stem_dict_ascii <- stem_dict %>% 
+  mutate(stem = stri_trans_general(stem,
+                                   "Latin-ASCII"),
+        word = stri_trans_general(word,
+                                  "Latin-ASCII"))
+
+#sprawdzam, czy wszystkie kolumny, na których będę pracował są zakodowane w ASCII
+levels(as.factor(stri_enc_mark(kprm_ascii$word)))
+levels(as.factor(stri_enc_mark(stopwords_ascii)))
+levels(as.factor(stri_enc_mark(stem_dict_ascii$stem)))
+levels(as.factor(stri_enc_mark(stem_dict_ascii$word)))
+```
+
+Usuwam stopwords
+```{r}
+stopwords_ascii <- stopwords_ascii %>% str_split(", ", simplify = F) %>% unlist() %>% tibble()
+
+dane <- kprm_ascii %>% 
+              anti_join(stopwords_ascii, by = c("word" = "."))
+```
+
+Stemming: dodaję kolumnę z rdzeniem słowa oraz usuwam te wiersze (słowa), których nie znaleziono w słowniku. Są to skróty: dot., tj., dz.u, csr; 
+literówki: innch zamiast innych, rejestarcji zamiast rejestracji;
+liczby
+dwa słowa połączone w jedno (możliwe po usunięciu wcześniej myślników): finansowoksiegowych, kadrowoplacowych;
+nazwy własne: eurostat;
+słowa obce: power, traces
+```{r}
+stem_unique <- stem_dict_ascii %>% filter(!duplicated(word))
+
+#słowa nieznalezione w słowniku morfologicznym
+miscellaneous <- dane %>% 
+  left_join(stem_unique, by = ("word" = "word")) %>% 
+  filter(is.na(stem))
+
+as.factor(miscellaneous$word)
+
+dane <- dane %>%
+  left_join(stem_unique, by = ("word" = "word")) %>%
+  filter(!is.na(stem))
+```
+
+
+```{r}
+write_rds(x = dane, path = "dane_lda")
+```
+
